@@ -512,8 +512,8 @@ def filter_and_rank(videos, min_play=0, sort_by_quality=True, strict_mode=True, 
         # 计算质量分并附加到视频数据
         v["quality_score"] = calculate_quality_score(v)
 
-        # 质量分太低的也过滤掉（仅在enrich后执行）
-        if strict_mode and enriched and v["quality_score"] < 30:
+        # 质量分太低的也过滤掉（仅在enrich后执行）- 门槛降低到15分，避免过度过滤
+        if strict_mode and enriched and v["quality_score"] < 15:
             continue
 
         filtered.append(v)
@@ -583,18 +583,28 @@ def do_search(tags, number, days_limit, min_play=500, silent=False, sort_by_qual
             continue
 
         # 5. enrich后重新进行严格过滤（此时有完整数据）
-        enriched = filter_and_rank(enriched, min_play=0, sort_by_quality=sort_by_quality, strict_mode=True, enriched=True)
-
-        if not enriched:
-            if not silent:
-                print(f"  ⚠ 严格过滤后无可用视频")
-            continue
-
-        videos_by_tag[tag] = enriched[:number]
-
+        # 策略：先尝试严格过滤，如果不够N个，逐步放宽直到凑够
+        filtered_strict = filter_and_rank(enriched, min_play=0, sort_by_quality=sort_by_quality, strict_mode=True, enriched=True)
+        
+        if len(filtered_strict) >= number:
+            # 严格过滤后够数，直接使用
+            videos_by_tag[tag] = filtered_strict[:number]
+            filter_mode = "严格过滤"
+        else:
+            # 严格过滤后不够，尝试宽松过滤（去掉strict_mode）
+            filtered_loose = filter_and_rank(enriched, min_play=0, sort_by_quality=sort_by_quality, strict_mode=False, enriched=True)
+            if len(filtered_loose) >= number:
+                videos_by_tag[tag] = filtered_loose[:number]
+                filter_mode = "宽松过滤"
+            else:
+                # 宽松过滤还不够，直接按质量分排序取前N个（不过滤）
+                enriched.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
+                videos_by_tag[tag] = enriched[:number]
+                filter_mode = "质量分排序"
+        
         if not silent:
-            avg_score = sum(v.get("quality_score", 0) for v in enriched[:number]) / len(enriched[:number]) if enriched[:number] else 0
-            print(f"  ✅ 筛选出 {len(enriched[:number])} 个视频 (平均质量分: {avg_score:.1f})")
+            avg_score = sum(v.get("quality_score", 0) for v in videos_by_tag[tag]) / len(videos_by_tag[tag]) if videos_by_tag[tag] else 0
+            print(f"  ✅ [{filter_mode}] 筛选出 {len(videos_by_tag[tag])} 个视频 (平均质量分: {avg_score:.1f})")
 
     return videos_by_tag
 
@@ -1165,12 +1175,23 @@ def _run_search_job(job_id, tags, number, days_limit, min_play):
                 continue
 
             # enrich后重新进行严格过滤（此时有完整数据）
-            enriched = filter_and_rank(enriched, min_play=0, sort_by_quality=True, strict_mode=True, enriched=True)
-
-            if not enriched:
+            # 策略：先尝试严格过滤，如果不够N个，逐步放宽直到凑够
+            filtered_strict = filter_and_rank(enriched, min_play=0, sort_by_quality=True, strict_mode=True, enriched=True)
+            
+            if len(filtered_strict) >= number:
+                videos_by_tag[tag] = filtered_strict[:number]
+            else:
+                # 严格过滤后不够，尝试宽松过滤
+                filtered_loose = filter_and_rank(enriched, min_play=0, sort_by_quality=True, strict_mode=False, enriched=True)
+                if len(filtered_loose) >= number:
+                    videos_by_tag[tag] = filtered_loose[:number]
+                else:
+                    # 宽松过滤还不够，直接按质量分排序取前N个
+                    enriched.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
+                    videos_by_tag[tag] = enriched[:number]
+            
+            if not videos_by_tag[tag]:
                 continue
-
-            videos_by_tag[tag] = enriched[:number]
             avg_score = sum(v.get("quality_score", 0) for v in enriched[:number]) / len(enriched[:number]) if enriched[:number] else 0
             print(f"  [Job {job_id[:8]}] #{tag} 平均质量分: {avg_score:.1f}")
 
