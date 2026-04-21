@@ -300,10 +300,11 @@ def enrich_videos(videos, days_limit=None, silent=False):
 
 # 标题党/擦边关键词（大小写不敏感）
 LOW_QUALITY_KEYWORDS = [
-    # 擦边暗示
+    # 擦边暗示（扣分而非直接过滤）
     "擦边", "性感", "诱惑", "妩媚", "妖娆", "火辣", "劲爆",
+    "美女", "小姐姐", "妹妹", "女神",  # 从BLOCK移到扣分
     "不看后悔", "深夜", "私密", "禁播", "删减", "未删减",
-    "大尺度", "尺度", "暴露", "走光", "偷拍", "偷拍",
+    "大尺度", "尺度", "暴露", "走光", "偷拍",
     # 标题党
     "震惊", "惊呆了", "傻眼", "炸裂", "离谱", "逆天",
     "全网", "首发", "独家", "绝密", "内部", "泄露",
@@ -316,7 +317,8 @@ LOW_QUALITY_KEYWORDS = [
 # 严重擦边词（直接过滤）
 BLOCK_KEYWORDS = [
     "裸", "胸", "腿", "丝袜", "黑丝", "白丝", "jk", "制服",
-    "美女", "小姐姐", "妹妹", "女神", "纯欲", "甜欲",
+    # 放宽："美女", "小姐姐" 等词在B站太常见，移到 LOW_QUALITY_KEYWORDS 扣分而非直接过滤
+    "纯欲", "甜欲", "诱惑", "妩媚", "妖娆",
 ]
 
 
@@ -342,22 +344,22 @@ def is_low_quality_content(v):
         if kw in title:
             title_deduction += 15  # 每个词扣15分
 
-    # 3. 互动率过低（高播放低互动=封面党）
+    # 3. 互动率过低（高播放低互动=封面党）- 放宽门槛
     like_rate = like / play * 100
     coin_rate = coin / play * 100
 
-    if play > 50000:  # 高播放视频要求更高互动率
-        if like_rate < 1.0:  # 点赞率<1%
+    if play > 100000:  # 只针对超高播放视频
+        if like_rate < 0.3:  # 点赞率<0.3%（放宽）
             return True, f"高播低互动(点赞率{like_rate:.2f}%)"
-        if coin_rate < 0.05:  # 投币率<0.05%
+        if coin_rate < 0.01:  # 投币率<0.01%（放宽）
             return True, f"高播低认可(投币率{coin_rate:.3f}%)"
 
-    # 4. 短时长 + 高播放 = 疑似营销/搬运
-    if duration < 60 and play > 100000:
+    # 4. 短时长 + 超高播放 = 疑似营销/搬运
+    if duration < 30 and play > 500000:  # 更严格的条件
         return True, "短视频高播放(疑似营销)"
 
-    # 5. 标题过长（堆砌关键词）
-    if len(title) > 40:
+    # 5. 标题过长（堆砌关键词）- 放宽到60字符
+    if len(title) > 60:
         return True, "标题过长(堆砌关键词)"
 
     return False, None
