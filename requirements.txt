@@ -1,0 +1,2 @@
+# bilibili_picker.py 仅依赖 Python 标准库
+# 无额外第三方依赖
